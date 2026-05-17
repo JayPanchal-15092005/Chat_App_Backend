@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json()); // parses incoming JSON request bodies and makes them available as req.body in your route handlers
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || "https://your-vercel-frontend-url.vercel.app", // We will put your Vercel URL in your Render environment variables
+  origin: process.env.FRONTEND_URL || "https://your-vercel-frontend-url.vercel.app", // We will put your Vercel URL in your Render environment variables
   credentials: true 
 }));
 
