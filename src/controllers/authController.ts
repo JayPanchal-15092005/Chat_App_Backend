@@ -25,6 +25,38 @@ export async function getMe(
   }
 }
 
+// export async function authCallback(req: Request, res: Response, next: NextFunction) {
+//   try {
+//     const { userId: clerkId } = getAuth(req);
+
+//     if (!clerkId) {
+//       res.status(401).json({ message: "Unauthorized" });
+//       return;
+//     }
+
+//     let user = await User.findOne({ clerkId });
+
+//     if (!user) {
+//       // get user info from clerk and save to db
+//       const clerkUser = await clerkClient.users.getUser(clerkId);
+
+//       user = await User.create({
+//         clerkId,
+//         name: clerkUser.firstName
+//           ? `${clerkUser.firstName} ${clerkUser.lastName || ""}`.trim()
+//           : clerkUser.emailAddresses[0]?.emailAddress?.split("@")[0],
+//         email: clerkUser.emailAddresses[0]?.emailAddress,
+//         avatar: clerkUser.imageUrl,
+//       });
+//     }
+
+//     res.json(user);
+//   } catch (error) {
+//     res.status(500);
+//     next(error);
+//   }
+// }
+
 export async function authCallback(req: Request, res: Response, next: NextFunction) {
   try {
     const { userId: clerkId } = getAuth(req);
@@ -37,17 +69,29 @@ export async function authCallback(req: Request, res: Response, next: NextFuncti
     let user = await User.findOne({ clerkId });
 
     if (!user) {
-      // get user info from clerk and save to db
-      const clerkUser = await clerkClient.users.getUser(clerkId);
+      try {
+        // get user info from clerk and save to db
+        const clerkUser = await clerkClient.users.getUser(clerkId);
 
-      user = await User.create({
-        clerkId,
-        name: clerkUser.firstName
-          ? `${clerkUser.firstName} ${clerkUser.lastName || ""}`.trim()
-          : clerkUser.emailAddresses[0]?.emailAddress?.split("@")[0],
-        email: clerkUser.emailAddresses[0]?.emailAddress,
-        avatar: clerkUser.imageUrl,
-      });
+        user = await User.create({
+          clerkId,
+          name: clerkUser.firstName
+            ? `${clerkUser.firstName} ${clerkUser.lastName || ""}`.trim()
+            : clerkUser.emailAddresses[0]?.emailAddress?.split("@")[0],
+          email: clerkUser.emailAddresses[0]?.emailAddress,
+          avatar: clerkUser.imageUrl,
+        });
+      } catch (error: any) {
+        // Catch the MongoDB duplicate key error specifically
+        if (error.code === 11000) {
+          // If we hit this, it means another simultaneous request just created the user a millisecond ago.
+          // So, instead of crashing, we just fetch that newly created user!
+          user = await User.findOne({ clerkId });
+        } else {
+          // If it's a different error, throw it normally
+          throw error;
+        }
+      }
     }
 
     res.json(user);
