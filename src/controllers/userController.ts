@@ -16,3 +16,22 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
     next(error);
   }
 }
+
+export async function updateFcmToken(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.userId;
+    const { fcmToken } = req.body;
+
+    if (!fcmToken || typeof fcmToken !== "string") {
+      res.status(400).json({ message: "fcmToken is required" });
+      return;
+    }
+
+    await User.findByIdAndUpdate(userId, { fcmToken });
+
+    res.json({ message: "FCM token updated successfully" });
+  } catch (error) {
+    res.status(500);
+    next(error);
+  }
+}

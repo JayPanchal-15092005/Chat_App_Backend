@@ -8,6 +8,46 @@ import { User } from "../models/User.ts";
 // store online users in memory: userId -> socketId
 export const onlineUsers: Map<string, string> = new Map();
 
+// ─────────────────────────────────────────────
+// Expo Push Notification helper
+// ─────────────────────────────────────────────
+
+interface ExpoPushMessage {
+  to: string;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  sound?: "default" | null;
+  badge?: number;
+  channelId?: string;
+}
+
+async function sendExpoPushNotification(message: ExpoPushMessage): Promise<void> {
+  try {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "Accept-Encoding": "gzip, deflate",
+      },
+      body: JSON.stringify(message),
+    });
+
+    const result = await response.json() as any;
+
+    if (result?.data?.status === "error") {
+      console.error("Expo push notification error:", result.data.message);
+    }
+  } catch (error) {
+    console.error("Failed to send Expo push notification:", error);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Socket.io initialization
+// ─────────────────────────────────────────────
+
 export const initializeSocket = (httpServer: HttpServer) => {
   const allowedOrigins = [
     "http://localhost:8081", // Expo mobile
@@ -101,6 +141,40 @@ export const initializeSocket = (httpServer: HttpServer) => {
           // also emit to participants' personal rooms (for chat list view)
           for (const participantId of chat.participants) {
             io.to(`user:${participantId}`).emit("new-message", message);
+          }
+
+          // ─────────────────────────────────────────
+          // Push notification for OFFLINE participants
+          // ─────────────────────────────────────────
+          const senderUser = await User.findById(userId).select("name");
+          const senderName = senderUser?.name ?? "Someone";
+
+          for (const participantId of chat.participants) {
+            const participantIdStr = participantId.toString();
+
+            // Skip the sender themselves
+            if (participantIdStr === userId) continue;
+
+            // Skip if they are currently online (they already get the socket event)
+            if (onlineUsers.has(participantIdStr)) continue;
+
+            // Look up the recipient's FCM/Expo token
+            const recipient = await User.findById(participantIdStr).select("fcmToken name");
+            if (!recipient?.fcmToken) continue;
+
+            await sendExpoPushNotification({
+              to: recipient.fcmToken,
+              title: senderName,
+              body: text.length > 100 ? `${text.slice(0, 100)}…` : text,
+              sound: "default",
+              channelId: "messages",
+              data: {
+                chatId,
+                participantId: userId,           // the sender (from recipient's perspective)
+                name: senderName,
+                avatar: (message.sender as any)?.avatar ?? "",
+              },
+            });
           }
         } catch (error) {
           socket.emit("socket-error", { message: "Failed to send message" });
