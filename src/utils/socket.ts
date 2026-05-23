@@ -20,9 +20,28 @@ interface ExpoPushMessage {
   sound?: "default" | null;
   badge?: number;
   channelId?: string;
+  priority?: "default" | "normal" | "high";
+}
+
+interface ExpoPushTicket {
+  status: "ok" | "error";
+  id?: string;
+  message?: string;
+  details?: { error?: string };
 }
 
 async function sendExpoPushNotification(message: ExpoPushMessage): Promise<void> {
+  console.log(`[Push] Sending notification to token: ${message.to}`);
+
+  // Validate Expo push token format
+  if (
+    !message.to.startsWith("ExponentPushToken[") &&
+    !message.to.startsWith("ExpoPushToken[")
+  ) {
+    console.error("[Push] Invalid Expo push token format:", message.to);
+    return;
+  }
+
   try {
     const response = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
@@ -34,13 +53,15 @@ async function sendExpoPushNotification(message: ExpoPushMessage): Promise<void>
       body: JSON.stringify(message),
     });
 
-    const result = await response.json() as any;
+    const result = await response.json() as { data: ExpoPushTicket };
 
     if (result?.data?.status === "error") {
-      console.error("Expo push notification error:", result.data.message);
+      console.error("[Push] Expo push error:", result.data.message, result.data.details);
+    } else {
+      console.log("[Push] Notification sent successfully. Ticket id:", result?.data?.id);
     }
   } catch (error) {
-    console.error("Failed to send Expo push notification:", error);
+    console.error("[Push] Failed to call Expo push API:", error);
   }
 }
 
@@ -57,10 +78,8 @@ export const initializeSocket = (httpServer: HttpServer) => {
 
   const io = new SocketServer(httpServer, { cors: { origin: allowedOrigins } });
 
-  // verify socket connection - if the user is authenticated, we will store the user id in the socket
-
   io.use(async (socket, next) => {
-    const token = socket.handshake.auth.token; // this is what user will send from client
+    const token = socket.handshake.auth.token;
     if (!token) return next(new Error("Authentication error"));
 
     try {
@@ -69,31 +88,26 @@ export const initializeSocket = (httpServer: HttpServer) => {
       });
 
       const clerkId = session.sub;
-
       const user = await User.findOne({ clerkId });
       if (!user) return next(new Error("User not found"));
 
       socket.data.userId = user._id.toString();
-
       next();
     } catch (error: any) {
       next(new Error(error));
     }
   });
 
-  // this "connection" event name is special and should be written like this
-  // it's the event that is triggered when a new client connects to the server
-
   io.on("connection", (socket) => {
     const userId = socket.data.userId;
 
-    // send list of currently online users to the newly connected client
+    // Send list of currently online users to the newly connected client
     socket.emit("online-users", { userIds: Array.from(onlineUsers.keys()) });
 
-    // store user in the onlineUsers map
+    // Store user in the onlineUsers map
     onlineUsers.set(userId, socket.id);
 
-    // notify others that this current user is online
+    // Notify others that this user is now online
     socket.broadcast.emit("user-online", { userId });
 
     socket.join(`user:${userId}`);
@@ -106,7 +120,9 @@ export const initializeSocket = (httpServer: HttpServer) => {
       socket.leave(`chat:${chatId}`);
     });
 
-    // handle sending messages
+    // ─────────────────────────────────────────────────────────────────────
+    // Handle sending messages + push notifications
+    // ─────────────────────────────────────────────────────────────────────
     socket.on(
       "send-message",
       async (data: { chatId: string; text: string }) => {
@@ -135,48 +151,68 @@ export const initializeSocket = (httpServer: HttpServer) => {
 
           await message.populate("sender", "name avatar");
 
-          // emit to chat room (for users inside the chat)
+          // Emit to chat room (users inside the active chat screen)
           io.to(`chat:${chatId}`).emit("new-message", message);
 
-          // also emit to participants' personal rooms (for chat list view)
+          // Emit to participants' personal rooms (for chat list updates)
           for (const participantId of chat.participants) {
             io.to(`user:${participantId}`).emit("new-message", message);
           }
 
-          // ─────────────────────────────────────────
-          // Push notification for OFFLINE participants
-          // ─────────────────────────────────────────
+          // ─────────────────────────────────────────────────────────
+          // Push notifications for offline participants
+          // ─────────────────────────────────────────────────────────
           const senderUser = await User.findById(userId).select("name");
           const senderName = senderUser?.name ?? "Someone";
+          const senderAvatar = (message.sender as any)?.avatar ?? "";
 
           for (const participantId of chat.participants) {
             const participantIdStr = participantId.toString();
 
-            // Skip the sender themselves
+            // Skip the sender
             if (participantIdStr === userId) continue;
 
-            // Skip if they are currently online (they already get the socket event)
-            if (onlineUsers.has(participantIdStr)) continue;
+            const isOnline = onlineUsers.has(participantIdStr);
+            console.log(
+              `[Push] Recipient ${participantIdStr} is ${isOnline ? "ONLINE (socket)" : "OFFLINE"}`
+            );
 
-            // Look up the recipient's FCM/Expo token
-            const recipient = await User.findById(participantIdStr).select("fcmToken name");
-            if (!recipient?.fcmToken) continue;
+            // Send push notification regardless of online status
+            // because "online" via socket doesn't mean the chat screen is open
+            // The FCM notification will be suppressed by the OS if app is active
+            const recipient = await User.findById(participantIdStr).select("fcmToken");
+
+            if (!recipient) {
+              console.log(`[Push] Recipient ${participantIdStr} not found in DB.`);
+              continue;
+            }
+
+            if (!recipient.fcmToken) {
+              console.log(
+                `[Push] Recipient ${participantIdStr} has no FCM token saved — skipping push.`
+              );
+              continue;
+            }
+
+            console.log(`[Push] Sending push to recipient ${participantIdStr}`);
 
             await sendExpoPushNotification({
               to: recipient.fcmToken,
               title: senderName,
               body: text.length > 100 ? `${text.slice(0, 100)}…` : text,
               sound: "default",
+              priority: "high",
               channelId: "messages",
               data: {
                 chatId,
-                participantId: userId,           // the sender (from recipient's perspective)
+                participantId: userId,   // the sender (from the recipient's point of view)
                 name: senderName,
-                avatar: (message.sender as any)?.avatar ?? "",
+                avatar: senderAvatar,
               },
             });
           }
         } catch (error) {
+          console.error("[Socket] send-message error:", error);
           socket.emit("socket-error", { message: "Failed to send message" });
         }
       },
@@ -189,10 +225,8 @@ export const initializeSocket = (httpServer: HttpServer) => {
         isTyping: data.isTyping,
       };
 
-      // emit to chat room (for users inside the chat)
       socket.to(`chat:${data.chatId}`).emit("typing", typingPayload);
 
-      // also emit to other participant's personal room (for chat list view)
       try {
         const chat = await Chat.findById(data.chatId);
         if (chat) {
@@ -206,14 +240,12 @@ export const initializeSocket = (httpServer: HttpServer) => {
           }
         }
       } catch (error) {
-        // silently fail - typing indicator is not critical
+        // silently fail — typing indicator is not critical
       }
     });
 
     socket.on("disconnect", () => {
       onlineUsers.delete(userId);
-
-      // notify others
       socket.broadcast.emit("user-offline", { userId });
     });
   });
