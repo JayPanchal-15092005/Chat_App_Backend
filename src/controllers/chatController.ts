@@ -14,6 +14,7 @@ export async function getChats(req: AuthRequest, res: Response, next: NextFuncti
 
     const formattedChats = chats.map((chat) => {
       const otherParticipant = chat.participants.find((p) => p._id.toString() !== userId);
+      const isPinned = chat.pinnedBy.some((id) => id.toString() === userId);
 
       return {
         _id: chat._id,
@@ -21,6 +22,7 @@ export async function getChats(req: AuthRequest, res: Response, next: NextFuncti
         lastMessage: chat.lastMessage,
         lastMessageAt: chat.lastMessageAt,
         createdAt: chat.createdAt,
+        isPinned,
       };
     });
 
@@ -64,6 +66,7 @@ export async function getOrCreateChat(req: AuthRequest, res: Response, next: Nex
     }
 
     const otherParticipant = chat.participants.find((p: any) => p._id.toString() !== userId);
+    const isPinned = chat.pinnedBy.some((id) => id.toString() === userId);
 
     res.json({
       _id: chat._id,
@@ -71,7 +74,40 @@ export async function getOrCreateChat(req: AuthRequest, res: Response, next: Nex
       lastMessage: chat.lastMessage,
       lastMessageAt: chat.lastMessageAt,
       createdAt: chat.createdAt,
+      isPinned,
     });
+  } catch (error) {
+    res.status(500);
+    next(error);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Toggle pin/unpin a chat for the current user
+// ─────────────────────────────────────────────
+export async function togglePinChat(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.userId;
+    const { chatId } = req.params;
+
+    const chat = await Chat.findOne({ _id: chatId, participants: userId });
+
+    if (!chat) {
+      res.status(404).json({ message: "Chat not found" });
+      return;
+    }
+
+    const alreadyPinned = chat.pinnedBy.some((id) => id.toString() === userId);
+
+    if (alreadyPinned) {
+      chat.pinnedBy = chat.pinnedBy.filter((id) => id.toString() !== userId) as any;
+    } else {
+      (chat.pinnedBy as any).push(userId);
+    }
+
+    await chat.save();
+
+    res.json({ isPinned: !alreadyPinned, chatId });
   } catch (error) {
     res.status(500);
     next(error);

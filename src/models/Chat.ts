@@ -4,6 +4,7 @@ export interface IChat extends Document {
   participants: mongoose.Types.ObjectId[];
   lastMessage?: mongoose.Types.ObjectId;
   lastMessageAt?: Date;
+  pinnedBy: mongoose.Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,6 +27,13 @@ const ChatSchema = new Schema<IChat>(
       type: Date,
       default: Date.now,
     },
+    pinnedBy: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+        default: [],
+      },
+    ],
   },
   { timestamps: true }
 );
