@@ -100,16 +100,26 @@ export const initializeSocket = (httpServer: HttpServer) => {
     // ── Mark messages as DELIVERED ────────────────────────────────────
     socket.on("message-delivered", async ({ chatId }: { chatId: string }) => {
       try {
-        const result = await Message.updateMany(
-          { chat: chatId, sender: { $ne: userId }, status: "sent" },
-          { $set: { status: "delivered" } }
-        );
-        if (result.modifiedCount > 0) {
-          socket.to(`chat:${chatId}`).emit("message-status-update", {
-            chatId,
-            status: "delivered",
-            updatedBy: userId,
-          });
+        const updated = await Message.find(
+          { chat: chatId, sender: { $ne: userId }, status: "sent" }
+        ).select("sender");
+
+        if (updated.length > 0) {
+          await Message.updateMany(
+            { chat: chatId, sender: { $ne: userId }, status: "sent" },
+            { $set: { status: "delivered" } }
+          );
+
+          const payload = { chatId, status: "delivered", updatedBy: userId };
+
+          // Notify everyone in the chat room
+          socket.to(`chat:${chatId}`).emit("message-status-update", payload);
+
+          // Also notify each sender via their personal room (works even when not in chat)
+          const senderIds = [...new Set(updated.map((m) => m.sender.toString()))];
+          for (const senderId of senderIds) {
+            io.to(`user:${senderId}`).emit("message-status-update", payload);
+          }
         }
       } catch (error) {
         console.error("[Socket] message-delivered error:", error);
@@ -119,20 +129,28 @@ export const initializeSocket = (httpServer: HttpServer) => {
     // ── Mark messages as SEEN ─────────────────────────────────────────
     socket.on("message-seen", async ({ chatId }: { chatId: string }) => {
       try {
-        const result = await Message.updateMany(
-          {
-            chat: chatId,
-            sender: { $ne: userId },
-            status: { $in: ["sent", "delivered"] },
-          },
-          { $set: { status: "seen" } }
-        );
-        if (result.modifiedCount > 0) {
-          socket.to(`chat:${chatId}`).emit("message-status-update", {
-            chatId,
-            status: "seen",
-            updatedBy: userId,
-          });
+        const updated = await Message.find({
+          chat: chatId,
+          sender: { $ne: userId },
+          status: { $in: ["sent", "delivered"] },
+        }).select("sender");
+
+        if (updated.length > 0) {
+          await Message.updateMany(
+            { chat: chatId, sender: { $ne: userId }, status: { $in: ["sent", "delivered"] } },
+            { $set: { status: "seen" } }
+          );
+
+          const payload = { chatId, status: "seen", updatedBy: userId };
+
+          // Notify everyone in the chat room
+          socket.to(`chat:${chatId}`).emit("message-status-update", payload);
+
+          // Also notify each original sender via their personal room
+          const senderIds = [...new Set(updated.map((m) => m.sender.toString()))];
+          for (const senderId of senderIds) {
+            io.to(`user:${senderId}`).emit("message-status-update", payload);
+          }
         }
       } catch (error) {
         console.error("[Socket] message-seen error:", error);
