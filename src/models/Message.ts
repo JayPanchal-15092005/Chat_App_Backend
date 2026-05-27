@@ -9,7 +9,8 @@ export interface IMessage extends Document {
   chat: mongoose.Types.ObjectId;
   sender: mongoose.Types.ObjectId;
   text: string;
-  type: "text";
+  type: "text" | "image" | "voice";
+  mediaUrl?: string;
   status: "sent" | "delivered" | "seen";
   replyTo?: mongoose.Types.ObjectId;
   reactions: IReaction[];
@@ -45,8 +46,12 @@ const MessageSchema = new Schema<IMessage>(
     },
     type: {
       type: String,
-      enum: ["text"],
+      enum: ["text", "image", "voice"],
       default: "text",
+    },
+    mediaUrl: {
+      type: String,
+      default: null,
     },
     status: {
       type: String,

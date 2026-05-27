@@ -160,9 +160,9 @@ export const initializeSocket = (httpServer: HttpServer) => {
     // ── Send message ──────────────────────────────────────────────────
     socket.on(
       "send-message",
-      async (data: { chatId: string; text: string; replyToId?: string }) => {
+      async (data: { chatId: string; text: string; replyToId?: string; type?: "text" | "image" | "voice"; mediaUrl?: string }) => {
         try {
-          const { chatId, text, replyToId } = data;
+          const { chatId, text, replyToId, type = "text", mediaUrl } = data;
 
           const chat = await Chat.findOne({ _id: chatId, participants: userId });
           if (!chat) {
@@ -174,9 +174,12 @@ export const initializeSocket = (httpServer: HttpServer) => {
             chat: chatId,
             sender: userId,
             text,
+            type,
+            mediaUrl: mediaUrl || null,
             replyTo: replyToId || null,
             status: "sent",
           });
+
 
           chat.lastMessage = message._id;
           chat.lastMessageAt = new Date();
