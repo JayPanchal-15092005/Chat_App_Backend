@@ -4,6 +4,7 @@ const router = Router();
 
 router.get("/credentials", async (req, res) => {
   try {
+    console.log("METERED_SECRET_KEY =", process.env.METERED_SECRET_KEY);
     const response = await fetch(
       `https://jay.metered.live/api/v1/turn/credentials?apiKey=${process.env.METERED_SECRET_KEY}`
     );
