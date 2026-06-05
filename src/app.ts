@@ -9,6 +9,7 @@ import messageRoutes from "./routes/messageRoutes.ts";
 import userRoutes from "./routes/userRoutes.ts";
 import uploadRoutes from "./routes/uploadRoutes.ts";
 import turnRoutes from "./routes/turnRoutes.ts";
+import callRoutes from "./routes/callRoutes.ts";
 import { errorHandler } from "./middleware/errorHandler.ts";
 
 const app = express();
@@ -32,6 +33,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/turn", turnRoutes);
+app.use("/api/calls", callRoutes);
 
 // error handlers must come after all the routes and other middlewares so they can catch errors passed with next(err) or thrown inside async handlers.
 app.use(errorHandler);

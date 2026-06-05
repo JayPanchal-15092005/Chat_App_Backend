@@ -4,6 +4,7 @@ import { verifyToken } from "@clerk/express";
 import { Message } from "../models/Message.ts";
 import { Chat } from "../models/Chat.ts";
 import { User } from "../models/User.ts";
+import { Call } from "../models/Call.ts";
 
 export const onlineUsers: Map<string, string> = new Map();
 
@@ -407,31 +408,49 @@ export const initializeSocket = (httpServer: HttpServer) => {
     });
 
     // ── WebRTC Calling Signaling ──────────────────────────────────────
-   socket.on(
-  "call-offer",
-  async ({
-    targetUserId,
-    offer,
-    callType,
-    callerName,
-    callerAvatar,
-  }) => {
+    socket.on("call-offer", async (data: {
+      targetUserId: string;
+      offer: any;
+      callType: string;
+      callerName?: string;
+      callerAvatar?: string;
+    }) => {
+      try {
+        const { targetUserId, offer, callType } = data;
 
-    console.log("=================================");
-    console.log("CALL OFFER RECEIVED");
-    console.log("From:", userId);
-    console.log("To:", targetUserId);
-    console.log("Call Type:", callType);
-    console.log("Target Online:", onlineUsers.has(targetUserId));
-    console.log("=================================");
+        // Query real caller info from DB instead of trusting frontend
+        const callerUser = await User.findById(userId);
+        const callerName = callerUser?.name || "Unknown";
+        const callerAvatar = callerUser?.avatar || "";
 
-    io.to(`user:${targetUserId}`).emit("incoming-call", {
-      callerId: userId,
-      callerName,
-      callerAvatar,
-      offer,
-      callType,
-    });
+        console.log("=================================");
+        console.log("CALL OFFER RECEIVED");
+        console.log("From:", userId, "(", callerName, ")");
+        console.log("To:", targetUserId);
+        console.log("Call Type:", callType);
+        console.log("Target Online:", onlineUsers.has(targetUserId));
+        console.log("=================================");
+
+        // Create call record in DB
+        const call = await Call.create({
+          caller: userId,
+          receiver: targetUserId,
+          type: callType === "video" ? "video" : "audio",
+          status: "ongoing",
+        });
+
+        // Track active call on this socket
+        socket.data.activeCallId = call._id;
+
+        // Emit incoming-call to the receiver
+        io.to(`user:${targetUserId}`).emit("incoming-call", {
+          callerId: userId,
+          callerName,
+          callerAvatar,
+          offer,
+          callType,
+          callId: call._id.toString(),
+        });
 
         // Send push notification if they are offline
         if (!onlineUsers.has(targetUserId)) {
@@ -459,53 +478,170 @@ export const initializeSocket = (httpServer: HttpServer) => {
             console.error("[Socket] Failed to send push for call-offer", e);
           }
         }
-      },
-    );
-
-   socket.on(
-  "call-answer",
-  ({ targetUserId, answer }) => {
-
-    console.log("CALL ANSWER RECEIVED");
-    console.log("From:", userId);
-    console.log("To:", targetUserId);
-
-    io.to(`user:${targetUserId}`).emit("call-answer-forwarded", {
-      answer,
+      } catch (error) {
+        console.error("[Socket] call-offer error:", error);
+      }
     });
-  }
-);
-socket.on(
-  "ice-candidate",
-  ({ targetUserId, candidate }) => {
 
-    console.log("ICE CANDIDATE");
-    console.log("From:", userId);
-    console.log("To:", targetUserId);
+    socket.on("call-answer", async ({ targetUserId, answer }: {
+      targetUserId: string;
+      answer: any;
+    }) => {
+      try {
+        console.log("CALL ANSWER RECEIVED");
+        console.log("From:", userId);
+        console.log("To:", targetUserId);
 
-    io.to(`user:${targetUserId}`).emit(
-      "ice-candidate-forwarded",
-      { candidate }
-    );
-  }
-);
+        // Update call record to answered with startTime
+        const activeCallId = socket.data.activeCallId;
+        if (activeCallId) {
+          await Call.findByIdAndUpdate(activeCallId, {
+            status: "answered",
+            startTime: new Date(),
+          });
+        } else {
+          // Find the ongoing call where this user is the receiver
+          const call = await Call.findOneAndUpdate(
+            { receiver: userId, caller: targetUserId, status: "ongoing" },
+            { status: "answered", startTime: new Date() },
+            { sort: { createdAt: -1 } }
+          );
+          if (call) {
+            socket.data.activeCallId = call._id;
+          }
+        }
 
-    socket.on("call-end", ({ targetUserId }: { targetUserId: string }) => {
-      io.to(`user:${targetUserId}`).emit("call-ended");
+        io.to(`user:${targetUserId}`).emit("call-answer-forwarded", {
+          answer,
+        });
+      } catch (error) {
+        console.error("[Socket] call-answer error:", error);
+      }
+    });
+
+    socket.on("call-reject", async ({ targetUserId }: {
+      targetUserId: string;
+    }) => {
+      try {
+        console.log("CALL REJECTED by", userId, "notifying", targetUserId);
+
+        // Update call record to rejected
+        const activeCallId = socket.data.activeCallId;
+        if (activeCallId) {
+          await Call.findByIdAndUpdate(activeCallId, {
+            status: "rejected",
+            endTime: new Date(),
+          });
+          socket.data.activeCallId = null;
+        } else {
+          // Find the ongoing call where this user is the receiver
+          await Call.findOneAndUpdate(
+            { receiver: userId, caller: targetUserId, status: "ongoing" },
+            { status: "rejected", endTime: new Date() },
+            { sort: { createdAt: -1 } }
+          );
+        }
+
+        io.to(`user:${targetUserId}`).emit("call-rejected");
+      } catch (error) {
+        console.error("[Socket] call-reject error:", error);
+      }
+    });
+
+    socket.on("ice-candidate", ({ targetUserId, candidate }: {
+      targetUserId: string;
+      candidate: any;
+    }) => {
+      console.log("ICE CANDIDATE");
+      console.log("From:", userId);
+      console.log("To:", targetUserId);
+
+      io.to(`user:${targetUserId}`).emit("ice-candidate-forwarded", {
+        candidate,
+      });
+    });
+
+    socket.on("call-end", async ({ targetUserId }: { targetUserId: string }) => {
+      try {
+        console.log("CALL ENDED by", userId, "notifying", targetUserId);
+
+        // Find and update the call record
+        const activeCallId = socket.data.activeCallId;
+        if (activeCallId) {
+          const call = await Call.findById(activeCallId);
+          if (call) {
+            const endTime = new Date();
+            let duration = 0;
+            let status = call.status;
+
+            if (call.status === "ongoing") {
+              // Never answered — mark as missed
+              status = "missed";
+            } else if (call.status === "answered" && call.startTime) {
+              // Was answered — calculate duration
+              duration = Math.round(
+                (endTime.getTime() - call.startTime.getTime()) / 1000
+              );
+            }
+
+            await Call.findByIdAndUpdate(activeCallId, {
+              status,
+              endTime,
+              duration,
+            });
+          }
+          socket.data.activeCallId = null;
+        }
+
+        io.to(`user:${targetUserId}`).emit("call-ended");
+      } catch (error) {
+        console.error("[Socket] call-end error:", error);
+      }
     });
 
     // ── Disconnect ────────────────────────────────────────────────────
-    // socket.on("disconnect", () => {
-    //   onlineUsers.delete(userId);
-    //   socket.broadcast.emit("user-offline", { userId });
-    // });
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
+      console.log("USER DISCONNECTED:", userId);
 
-  console.log("USER DISCONNECTED:", userId);
+      // Clean up active call on disconnect
+      if (socket.data.activeCallId) {
+        try {
+          const call = await Call.findById(socket.data.activeCallId);
+          if (call && (call.status === "ongoing" || call.status === "answered")) {
+            const endTime = new Date();
+            let duration = 0;
+            let status: string = call.status;
 
-  onlineUsers.delete(userId);
-  socket.broadcast.emit("user-offline", { userId });
-});
+            if (call.status === "ongoing") {
+              status = "missed";
+            } else if (call.status === "answered" && call.startTime) {
+              duration = Math.round(
+                (endTime.getTime() - call.startTime.getTime()) / 1000
+              );
+            }
+
+            await Call.findByIdAndUpdate(socket.data.activeCallId, {
+              status,
+              endTime,
+              duration,
+            });
+
+            // Notify the other party
+            const otherUserId =
+              call.caller.toString() === userId
+                ? call.receiver.toString()
+                : call.caller.toString();
+            io.to(`user:${otherUserId}`).emit("call-ended");
+          }
+          socket.data.activeCallId = null;
+        } catch (error) {
+          console.error("[Socket] disconnect call cleanup error:", error);
+        }
+      }
+
+      onlineUsers.delete(userId);
+      socket.broadcast.emit("user-offline", { userId });
+    });
   });
 
   return io;
