@@ -20,7 +20,9 @@ interface ExpoPushMessage {
   sound?: "default" | null;
   badge?: number;
   channelId?: string;
+  categoryId?: string;
   priority?: "default" | "normal" | "high";
+  ttl?: number;
 }
 
 async function sendExpoPushNotification(
@@ -452,31 +454,34 @@ export const initializeSocket = (httpServer: HttpServer) => {
           callId: call._id.toString(),
         });
 
-        // Send push notification if they are offline
-        if (!onlineUsers.has(targetUserId)) {
-          try {
-            const recipient =
-              await User.findById(targetUserId).select("fcmToken");
-            if (recipient?.fcmToken) {
-              await sendExpoPushNotification({
-                to: recipient.fcmToken,
-                title: callerName,
-                body: "Incoming audio call...",
-                sound: "default",
-                priority: "high",
-                channelId: "messages",
-                data: {
-                  type: "incoming-call",
-                  callerId: userId,
-                  callerName,
-                  callerAvatar,
-                  callType,
-                },
-              });
-            }
-          } catch (e) {
-            console.error("[Socket] Failed to send push for call-offer", e);
+        // ALWAYS send call push notification regardless of online status.
+        // A backgrounded/locked device may still appear "online" via socket
+        // but won't see the in-app modal. The push is the fallback delivery.
+        try {
+          const recipient = await User.findById(targetUserId).select("fcmToken");
+          if (recipient?.fcmToken) {
+            await sendExpoPushNotification({
+              to: recipient.fcmToken,
+              title: `📞 ${callerName}`,
+              body: `Incoming ${callType === "video" ? "video" : "audio"} call...`,
+              sound: "default",
+              priority: "high",
+              channelId: "incoming_call",
+              categoryId: "INCOMING_CALL",
+              ttl: 30,
+              data: {
+                type: "incoming-call",
+                callerId: userId,
+                callerName,
+                callerAvatar,
+                callType,
+                callId: call._id.toString(),
+              },
+            });
+            console.log(`[Socket] Call push sent to ${targetUserId}`);
           }
+        } catch (e) {
+          console.error("[Socket] Failed to send push for call-offer", e);
         }
       } catch (error) {
         console.error("[Socket] call-offer error:", error);
