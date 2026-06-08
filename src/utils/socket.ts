@@ -5,6 +5,7 @@ import { Message } from "../models/Message.ts";
 import { Chat } from "../models/Chat.ts";
 import { User } from "../models/User.ts";
 import { Call } from "../models/Call.ts";
+import { admin } from "./firebase.ts";
 
 export const onlineUsers: Map<string, string> = new Map();
 
@@ -238,11 +239,11 @@ export const initializeSocket = (httpServer: HttpServer) => {
             const pidStr = participantId.toString();
             if (pidStr === userId) continue;
 
-            const recipient = await User.findById(pidStr).select("fcmToken");
-            if (!recipient?.fcmToken) continue;
+            const recipient = await User.findById(pidStr).select("expoPushToken");
+            if (!recipient?.expoPushToken) continue;
 
             await sendExpoPushNotification({
-              to: recipient.fcmToken,
+              to: recipient.expoPushToken,
               title: senderName,
               body: text.length > 100 ? `${text.slice(0, 100)}…` : text,
               sound: "default",
@@ -409,6 +410,31 @@ export const initializeSocket = (httpServer: HttpServer) => {
       }
     });
 
+    // ── Fetch Ongoing Call (for Killed State Wakeup) ──────────────────
+    socket.on("fetch-ongoing-call", async () => {
+      try {
+        const ongoingCall = await Call.findOne({
+          receiver: userId,
+          status: "ongoing",
+        }).populate("caller", "name avatar");
+
+        if (ongoingCall) {
+          const caller: any = ongoingCall.caller;
+          socket.emit("incoming-call", {
+            callerId: caller._id.toString(),
+            callerName: caller.name,
+            callerAvatar: caller.avatar,
+            offer: ongoingCall.offer,
+            callType: ongoingCall.type,
+            callId: ongoingCall._id.toString(),
+          });
+          console.log(`[Socket] Delivered ongoing call offer to woke-up receiver ${userId}`);
+        }
+      } catch (error) {
+        console.error("[Socket] fetch-ongoing-call error:", error);
+      }
+    });
+
     // ── WebRTC Calling Signaling ──────────────────────────────────────
     socket.on("call-offer", async (data: {
       targetUserId: string;
@@ -439,6 +465,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
           receiver: targetUserId,
           type: callType === "video" ? "video" : "audio",
           status: "ongoing",
+          offer,
         });
 
         // Track active call on this socket
@@ -460,15 +487,22 @@ export const initializeSocket = (httpServer: HttpServer) => {
         try {
           const recipient = await User.findById(targetUserId).select("fcmToken");
           if (recipient?.fcmToken) {
-            await sendExpoPushNotification({
-              to: recipient.fcmToken,
-              title: `📞 ${callerName}`,
-              body: `Incoming ${callType === "video" ? "video" : "audio"} call...`,
-              sound: "default",
-              priority: "high",
-              channelId: "incoming_call",
-              categoryId: "INCOMING_CALL",
-              ttl: 30,
+            await admin.messaging().send({
+              token: recipient.fcmToken,
+              android: {
+                priority: "high"
+              },
+              apns: {
+                headers: {
+                  "apns-priority": "10",
+                  "apns-push-type": "background"
+                },
+                payload: {
+                  aps: {
+                    contentAvailable: true
+                  }
+                }
+              },
               data: {
                 type: "incoming-call",
                 callerId: userId,
@@ -478,27 +512,31 @@ export const initializeSocket = (httpServer: HttpServer) => {
                 callId: call._id.toString(),
               },
             });
-            console.log(`[Socket] Call push sent to ${targetUserId}`);
+            console.log(`[Socket] FCM VoIP push sent to ${targetUserId}`);
           }
         } catch (e) {
-          console.error("[Socket] Failed to send push for call-offer", e);
+          console.error("[Socket] Failed to send FCM for call-offer", e);
         }
       } catch (error) {
         console.error("[Socket] call-offer error:", error);
       }
     });
 
-    socket.on("call-answer", async ({ targetUserId, answer }: {
+    socket.on("call-answer", async ({ targetUserId, answer, callId: clientCallId }: {
       targetUserId: string;
       answer: any;
+      callId?: string;
     }) => {
       try {
+        console.log("================================");
         console.log("CALL ANSWER RECEIVED");
-        console.log("From:", userId);
-        console.log("To:", targetUserId);
+        console.log("Receiver:", userId, "→ Caller:", targetUserId);
+        console.log("================================");
 
         // Update call record to answered with startTime
         const activeCallId = socket.data.activeCallId;
+        let resolvedCallId = activeCallId;
+
         if (activeCallId) {
           await Call.findByIdAndUpdate(activeCallId, {
             status: "answered",
@@ -509,16 +547,25 @@ export const initializeSocket = (httpServer: HttpServer) => {
           const call = await Call.findOneAndUpdate(
             { receiver: userId, caller: targetUserId, status: "ongoing" },
             { status: "answered", startTime: new Date() },
-            { sort: { createdAt: -1 } }
+            { sort: { createdAt: -1 }, new: true }
           );
           if (call) {
+            resolvedCallId = call._id;
             socket.data.activeCallId = call._id;
           }
         }
 
-        io.to(`user:${targetUserId}`).emit("call-answer-forwarded", {
-          answer,
-        });
+        // Forward the SDP answer to the caller
+        io.to(`user:${targetUserId}`).emit("call-answer-forwarded", { answer });
+
+        // Emit call-connected to both sides as a redundant confirmation signal.
+        // The mobile callStore uses this as a fallback if the SDP transition
+        // doesn't trigger a state change (e.g. slow ICE negotiation).
+        const connectedPayload = { callId: resolvedCallId?.toString() };
+        io.to(`user:${targetUserId}`).emit("call-connected", connectedPayload);
+        io.to(`user:${userId}`).emit("call-connected", connectedPayload);
+
+        console.log("[Socket] call-answer forwarded + call-connected emitted for call:", resolvedCallId);
       } catch (error) {
         console.error("[Socket] call-answer error:", error);
       }

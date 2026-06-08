@@ -17,19 +17,23 @@ export async function getUsers(req: AuthRequest, res: Response, next: NextFuncti
   }
 }
 
-export async function updateFcmToken(req: AuthRequest, res: Response, next: NextFunction) {
+export async function updatePushTokens(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId;
-    const { fcmToken } = req.body;
+    const { expoPushToken, fcmToken } = req.body;
 
-    if (!fcmToken || typeof fcmToken !== "string") {
-      res.status(400).json({ message: "fcmToken is required" });
+    const updateData: any = {};
+    if (expoPushToken !== undefined) updateData.expoPushToken = expoPushToken;
+    if (fcmToken !== undefined) updateData.fcmToken = fcmToken;
+
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({ message: "At least one token (expoPushToken or fcmToken) is required" });
       return;
     }
 
-    await User.findByIdAndUpdate(userId, { fcmToken });
+    await User.findByIdAndUpdate(userId, updateData);
 
-    res.json({ message: "FCM token updated successfully" });
+    res.json({ message: "Push tokens updated successfully" });
   } catch (error) {
     res.status(500);
     next(error);

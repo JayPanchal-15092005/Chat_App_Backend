@@ -5,6 +5,7 @@ export interface IUser extends Document {
   name: string;
   email: string;
   avatar: string;
+  expoPushToken?: string;
   fcmToken?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -31,6 +32,10 @@ const UserSchema = new Schema<IUser>({
   avatar: {
     type: String,
     default: "",
+  },
+  expoPushToken: {
+    type: String,
+    default: null,
   },
   fcmToken: {
     type: String,

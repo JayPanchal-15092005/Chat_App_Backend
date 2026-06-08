@@ -5,6 +5,7 @@ export interface ICall extends Document {
   receiver: Types.ObjectId;
   type: "audio" | "video";
   status: "missed" | "rejected" | "answered" | "ongoing";
+  offer?: any;
   startTime?: Date;
   endTime?: Date;
   duration: number;
@@ -22,6 +23,7 @@ const CallSchema = new Schema<ICall>(
       enum: ["missed", "rejected", "answered", "ongoing"],
       default: "ongoing",
     },
+    offer: { type: Schema.Types.Mixed, default: null },
     startTime: { type: Date, default: null },
     endTime: { type: Date, default: null },
     duration: { type: Number, default: 0 },
