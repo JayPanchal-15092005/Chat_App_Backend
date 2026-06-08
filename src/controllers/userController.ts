@@ -24,10 +24,21 @@ export async function updatePushTokens(req: AuthRequest, res: Response, next: Ne
 
     const updateData: any = {};
     if (expoPushToken !== undefined) updateData.expoPushToken = expoPushToken;
-    if (fcmToken !== undefined) updateData.fcmToken = fcmToken;
+    
+    if (fcmToken !== undefined) {
+      if (typeof fcmToken === "string" && (fcmToken.startsWith("ExponentPushToken") || fcmToken.startsWith("ExpoPushToken"))) {
+        console.warn(`[API] Invalid FCM token rejected for user ${userId}: ${fcmToken}`);
+        // Auto-correct: save it to expoPushToken instead if expoPushToken wasn't provided
+        if (expoPushToken === undefined) {
+          updateData.expoPushToken = fcmToken;
+        }
+      } else {
+        updateData.fcmToken = fcmToken;
+      }
+    }
 
     if (Object.keys(updateData).length === 0) {
-      res.status(400).json({ message: "At least one token (expoPushToken or fcmToken) is required" });
+      res.status(400).json({ message: "At least one valid token (expoPushToken or fcmToken) is required" });
       return;
     }
 

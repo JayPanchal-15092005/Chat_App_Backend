@@ -485,10 +485,26 @@ export const initializeSocket = (httpServer: HttpServer) => {
         // A backgrounded/locked device may still appear "online" via socket
         // but won't see the in-app modal. The push is the fallback delivery.
         try {
-          const recipient = await User.findById(targetUserId).select("fcmToken");
-          if (recipient?.fcmToken) {
+          const recipient = await User.findById(targetUserId).select("fcmToken expoPushToken");
+          
+          let validFcmToken = recipient?.fcmToken;
+          
+          // CRITICAL: Clean up migration issues where old Expo tokens are stored in the fcmToken field.
+          if (validFcmToken && (validFcmToken.startsWith("ExponentPushToken") || validFcmToken.startsWith("ExpoPushToken"))) {
+            console.warn(`[Socket] INVALID FCM TOKEN DETECTED for user ${targetUserId}: ${validFcmToken}. Skipping FCM send.`);
+            validFcmToken = undefined;
+            
+            // Auto-migrate it to expoPushToken if it's missing
+            if (!recipient?.expoPushToken) {
+              await User.findByIdAndUpdate(targetUserId, { expoPushToken: validFcmToken, fcmToken: null });
+            } else {
+              await User.findByIdAndUpdate(targetUserId, { fcmToken: null });
+            }
+          }
+
+          if (validFcmToken) {
             await admin.messaging().send({
-              token: recipient.fcmToken,
+              token: validFcmToken,
               android: {
                 priority: "high"
               },
@@ -513,6 +529,8 @@ export const initializeSocket = (httpServer: HttpServer) => {
               },
             });
             console.log(`[Socket] FCM VoIP push sent to ${targetUserId}`);
+          } else {
+            console.warn(`[Socket] Cannot send FCM VoIP push to ${targetUserId}: No valid FCM token found.`);
           }
         } catch (e) {
           console.error("[Socket] Failed to send FCM for call-offer", e);
