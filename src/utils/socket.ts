@@ -299,6 +299,9 @@ export const initializeSocket = (httpServer: HttpServer) => {
                 existingReaction.emoji = emoji;
               }
             }
+          } else {
+            // Add new reaction
+            message.reactions.push({ userId, emoji } as any);
           }
 
           await message.save();
