@@ -1,6 +1,6 @@
 import { Server as SocketServer } from "socket.io";
 import { Server as HttpServer } from "http";
-import { verifyToken } from "@clerk/express";
+
 import { Message } from "../models/Message.ts";
 import { Chat } from "../models/Chat.ts";
 import { User } from "../models/User.ts";
@@ -74,11 +74,13 @@ export const initializeSocket = (httpServer: HttpServer) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error("Authentication error"));
     try {
-      const session = await verifyToken(token, {
-        secretKey: process.env.CLERK_SECRET_KEY!,
-      });
-      const user = await User.findOne({ clerkId: session.sub });
+      // Verify Firebase ID Token
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      
+      // Find user by firebaseUid (clerkId is kept for backwards compatibility)
+      const user = await User.findOne({ clerkId: decodedToken.uid });
       if (!user) return next(new Error("User not found"));
+      
       socket.data.userId = user._id.toString();
       next();
     } catch (error: any) {

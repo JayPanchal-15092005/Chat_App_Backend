@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
-import { clerkMiddleware } from "@clerk/express";
 
 import authRoutes from "./routes/authRoutes.ts";
 import chatRoutes from "./routes/chatRoutes.ts";
@@ -17,11 +16,10 @@ const app = express();
 app.use(express.json()); // parses incoming JSON request bodies and makes them available as req.body in your route handlers
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "https://your-vercel-frontend-url.vercel.app", // We will put your Vercel URL in your Render environment variables
+  origin: process.env.FRONTEND_URL || "https://chat-app-psi-wheat-58.vercel.app/", // We will put your Vercel URL in your Render environment variables
   credentials: true 
 }));
 
-app.use(clerkMiddleware());
 
 app.get("/health", (req, res) => {
     res.json({ status: "OK", message: "server is up and running there is no issues in the server" });
