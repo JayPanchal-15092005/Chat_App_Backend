@@ -47,22 +47,37 @@ export async function authCallback(req: AuthRequest, res: Response, next: NextFu
 
     if (!user) {
       try {
-        // get user info from Firebase and save to db
+        // get user info from Firebase
         const firebaseUser = await admin.auth().getUser(firebaseUid);
+        const userEmail = firebaseUser.email || `${firebaseUid}@placeholder.com`;
 
-        // Name fallback: 1. DisplayName, 2. Email username, 3. 'User'
-        let name = firebaseUser.displayName;
-        if (!name && firebaseUser.email) {
-          name = firebaseUser.email.split("@")[0];
+        // Check if user already exists by email (from previous Clerk auth)
+        const existingUserByEmail = await User.findOne({ email: userEmail });
+
+        if (existingUserByEmail) {
+          // Link accounts: update the old clerkId to the new firebaseUid
+          existingUserByEmail.clerkId = firebaseUid;
+          // Also update avatar if it was empty, just in case
+          if (!existingUserByEmail.avatar && firebaseUser.photoURL) {
+            existingUserByEmail.avatar = firebaseUser.photoURL;
+          }
+          await existingUserByEmail.save();
+          user = existingUserByEmail;
+        } else {
+          // Name fallback: 1. DisplayName, 2. Email username, 3. 'User'
+          let name = firebaseUser.displayName;
+          if (!name && firebaseUser.email) {
+            name = firebaseUser.email.split("@")[0];
+          }
+          if (!name) name = "User";
+
+          user = await User.create({
+            clerkId: firebaseUid, // we keep the field name clerkId for backwards compatibility in DB
+            name: name.trim(),
+            email: userEmail,
+            avatar: firebaseUser.photoURL || "",
+          });
         }
-        if (!name) name = "User";
-
-        user = await User.create({
-          clerkId: firebaseUid, // we keep the field name clerkId for backwards compatibility in DB
-          name: name.trim(),
-          email: firebaseUser.email || `${firebaseUid}@placeholder.com`,
-          avatar: firebaseUser.photoURL || "",
-        });
       } catch (error: any) {
         // Catch the MongoDB duplicate key error specifically
         if (error.code === 11000) {
