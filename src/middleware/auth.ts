@@ -1,29 +1,49 @@
 import type { Request, Response, NextFunction } from "express";
-import { getAuth } from "@clerk/express";
+import { admin } from "../utils/firebase.ts";
 import { User } from "../models/User.ts";
-import { requireAuth } from "@clerk/express";
 
 export type AuthRequest = Request & {
   userId?: string;
+  firebaseUid?: string;
 };
 
 export const protectRoute = [
-  requireAuth(),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const { userId: clerkId } = getAuth(req);
-      // since we call requireAuth() this if check is not necessary
-      // if (!clerkId) return res.status(401).json({ message: "Unauthorized - invalid token" });
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ message: "Unauthorized - missing token" });
+      }
 
-      const user = await User.findOne({ clerkId });
-      if (!user) return res.status(404).json({ message: "User not found" });
+      const token = authHeader.split(" ")[1];
+      if (!token) {
+        return res.status(401).json({ message: "Unauthorized - missing token" });
+      }
+
+      // Verify the Firebase ID token
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      const firebaseUid = decodedToken.uid;
+
+      // Find user by firebaseUid (formerly clerkId)
+      const user = await User.findOne({ clerkId: firebaseUid });
+      
+      if (!user) {
+        // Allow the callback route to bypass the missing user check
+        // because it's responsible for CREATING the user
+        if (req.originalUrl.includes("/auth/callback") || req.originalUrl.includes("/auth/me")) {
+           req.firebaseUid = firebaseUid;
+           return next();
+        }
+        return res.status(404).json({ message: "User not found" });
+      }
 
       req.userId = user._id.toString();
+      req.firebaseUid = firebaseUid;
 
       next();
     } catch (error) {
-      res.status(500);
-      next(error);
+      console.error("[Auth] Token verification failed:", error);
+      res.status(401).json({ message: "Unauthorized - invalid token" });
     }
   },
 ];
