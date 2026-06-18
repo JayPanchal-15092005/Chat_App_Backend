@@ -56,6 +56,8 @@ async function sendExpoPushNotification(
   }
 }
 
+import jwt from "jsonwebtoken";
+
 // ─────────────────────────────────────────────
 // Socket initialization
 // ─────────────────────────────────────────────
@@ -74,11 +76,11 @@ export const initializeSocket = (httpServer: HttpServer) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error("Authentication error"));
     try {
-      // Verify Firebase ID Token
-      const decodedToken = await admin.auth().verifyIdToken(token);
+      // Verify custom JWT
+      const JWT_SECRET = process.env.JWT_SECRET || "qLAtX/n3gawbHWpxvaqhEXHU6g3l0FtM4o9Skse9NIU";
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
       
-      // Find user by firebaseUid (clerkId is kept for backwards compatibility)
-      const user = await User.findOne({ clerkId: decodedToken.uid });
+      const user = await User.findById(decoded.userId);
       if (!user) return next(new Error("User not found"));
       
       socket.data.userId = user._id.toString();

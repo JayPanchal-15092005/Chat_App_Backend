@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development";
+const JWT_SECRET = process.env.JWT_SECRET || "qLAtXn3gawbHWpxvaqhEXHU6g3l0FtM4o9Skse9NIU";
 
 export type AuthRequest = Request & {
   userId?: string;
