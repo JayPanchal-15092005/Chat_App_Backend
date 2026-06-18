@@ -126,3 +126,34 @@ export async function loginUser(req: Request, res: Response, next: NextFunction)
     next(error);
   }
 }
+
+export async function updateProfile(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const userId = req.userId;
+    const { name, avatar } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (name) user.name = name;
+    if (avatar !== undefined) user.avatar = avatar; // Allow empty string to clear avatar
+
+    await user.save();
+
+    res.status(200).json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+    });
+  } catch (error) {
+    res.status(500);
+    next(error);
+  }
+}
