@@ -36,3 +36,4 @@ cha-app-*.json
 
 # Finder (MacOS) folder config
 .DS_Store
+db_check.ts

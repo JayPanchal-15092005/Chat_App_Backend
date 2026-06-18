@@ -1,7 +1,8 @@
 import mongoose, { Schema, type Document } from "mongoose";
 
 export interface IUser extends Document {
-  clerkId: string;
+  clerkId?: string; // Made optional for backward compatibility
+  password?: string; // New field for custom auth
   name: string;
   email: string;
   avatar: string;
@@ -14,8 +15,13 @@ export interface IUser extends Document {
 const UserSchema = new Schema<IUser>({
   clerkId: {
     type: String,
-    required: true,
+    required: false, // Made optional
     unique: true,
+    sparse: true, // Allow multiple users to have undefined clerkId
+  },
+  password: {
+    type: String,
+    required: false, // Optional because old users won't have it initially
   },
   name: {
     type: String,

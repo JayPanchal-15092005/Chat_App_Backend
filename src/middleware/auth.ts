@@ -1,10 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
-import { admin } from "../utils/firebase.ts";
-import { User } from "../models/User.ts";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_for_development";
 
 export type AuthRequest = Request & {
   userId?: string;
-  firebaseUid?: string;
 };
 
 export const protectRoute = [
@@ -20,25 +20,10 @@ export const protectRoute = [
         return res.status(401).json({ message: "Unauthorized - missing token" });
       }
 
-      // Verify the Firebase ID token
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      const firebaseUid = decodedToken.uid;
-
-      // Find user by firebaseUid (formerly clerkId)
-      const user = await User.findOne({ clerkId: firebaseUid });
+      // Verify custom JWT
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
       
-      if (!user) {
-        // Allow the callback route to bypass the missing user check
-        // because it's responsible for CREATING the user
-        if (req.originalUrl.includes("/auth/callback") || req.originalUrl.includes("/auth/me")) {
-           req.firebaseUid = firebaseUid;
-           return next();
-        }
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      req.userId = user._id.toString();
-      req.firebaseUid = firebaseUid;
+      req.userId = decoded.userId;
 
       next();
     } catch (error) {

@@ -1,6 +1,6 @@
 import express from "express";
 import ImageKit from "imagekit";
-import { requireAuth } from "@clerk/express";
+import { protectRoute } from "../middleware/auth.ts";
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ const imagekit = new ImageKit({
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || "https://ik.imagekit.io/dx7pzaqkc",
 });
 
-router.get("/auth", requireAuth(), (req, res) => {
+router.get("/auth", protectRoute, (req: any, res: any) => {
   try {
     const result = imagekit.getAuthenticationParameters();
     res.json(result);

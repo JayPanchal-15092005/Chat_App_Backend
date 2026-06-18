@@ -9,17 +9,21 @@
     "build": "bun install"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bcryptjs": "^3.0.0",
+    "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.10"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
     "@types/express": "^5.0.6",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "firebase-admin": "^13.10.0",
     "imagekit": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.1",
     "socket.io": "^4.8.3"
   }
