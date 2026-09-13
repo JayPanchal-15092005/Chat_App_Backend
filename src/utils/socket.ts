@@ -7,7 +7,7 @@ import { User } from "../models/User.ts";
 import { Call } from "../models/Call.ts";
 import { admin } from "./firebase.ts";
 
-export const onlineUsers: Map<string, string> = new Map();
+export const onlineUsers: Map<string, Set<string>> = new Map();
 
 // ─────────────────────────────────────────────
 // Expo Push Notification helper
@@ -112,8 +112,12 @@ export const initializeSocket = (httpServer: HttpServer) => {
     const userId = socket.data.userId;
 
     socket.emit("online-users", { userIds: Array.from(onlineUsers.keys()) });
-    onlineUsers.set(userId, socket.id);
-    socket.broadcast.emit("user-online", { userId });
+    
+    if (!onlineUsers.has(userId)) {
+      onlineUsers.set(userId, new Set());
+      socket.broadcast.emit("user-online", { userId });
+    }
+    onlineUsers.get(userId)!.add(socket.id);
     socket.join(`user:${userId}`);
     console.log(`JOINED ROOM => user:${userId}`);
 
@@ -732,8 +736,14 @@ export const initializeSocket = (httpServer: HttpServer) => {
         }
       }
 
-      onlineUsers.delete(userId);
-      socket.broadcast.emit("user-offline", { userId });
+      const userSockets = onlineUsers.get(userId);
+      if (userSockets) {
+        userSockets.delete(socket.id);
+        if (userSockets.size === 0) {
+          onlineUsers.delete(userId);
+          socket.broadcast.emit("user-offline", { userId });
+        }
+      }
     });
   });
 
