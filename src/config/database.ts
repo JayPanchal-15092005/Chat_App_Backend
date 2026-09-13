@@ -9,6 +9,16 @@ export const connectDB = async () => {
     }
     await mongoose.connect(mongoUri);
     console.log("✅ MongoDB connected successfully");
+
+    // Drop the unique clerkId index to prevent E11000 duplicate key errors on signup
+    try {
+      await mongoose.connection.collection("users").dropIndex("clerkId_1");
+      console.log("Successfully dropped clerkId_1 index");
+    } catch (error: any) {
+      if (error.code !== 27) {
+        console.error("Note: clerkId_1 index could not be dropped", error.message);
+      }
+    }
   } catch (error) {
     console.error("❌ MongoDB connection error:", error);
     process.exit(1); // exit with failure

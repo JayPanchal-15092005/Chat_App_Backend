@@ -15,9 +15,8 @@ export interface IUser extends Document {
 const UserSchema = new Schema<IUser>({
   clerkId: {
     type: String,
-    required: false, // Made optional
-    unique: true,
-    sparse: true, // Allow multiple users to have undefined clerkId
+    required: false,
+    sparse: true,
   },
   password: {
     type: String,
