@@ -69,7 +69,19 @@ export const initializeSocket = (httpServer: HttpServer) => {
     process.env.FRONTEND_URL,
   ].filter(Boolean) as string[];
 
-  const io = new SocketServer(httpServer, { cors: { origin: allowedOrigins } });
+  const io = new SocketServer(httpServer, {
+    cors: {
+      // Allow mobile (no origin) + allowed web origins
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.some(o => origin.startsWith(o.replace(/\/$/, "")))) {
+          return callback(null, true);
+        }
+        return callback(new Error(`Socket CORS: origin ${origin} not allowed`));
+      },
+      credentials: true,
+    },
+  });
 
   // Auth middleware
   io.use(async (socket, next) => {
@@ -77,7 +89,8 @@ export const initializeSocket = (httpServer: HttpServer) => {
     if (!token) return next(new Error("Authentication error"));
     try {
       // Verify custom JWT
-      const JWT_SECRET = process.env.JWT_SECRET || "qLAtX/n3gawbHWpxvaqhEXHU6g3l0FtM4o9Skse9NIU";
+      const JWT_SECRET = process.env.JWT_SECRET;
+      if (!JWT_SECRET) return next(new Error("JWT_SECRET not configured"));
       const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
       
       const user = await User.findById(decoded.userId);
@@ -234,7 +247,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
             io.to(`user:${participantId}`).emit("new-message", message);
           }
 
-          // Push notifications for offline users
+          // Push notifications — only for users NOT connected to socket
           const senderUser = await User.findById(userId).select("name");
           const senderName = senderUser?.name ?? "Someone";
           const senderAvatar = (message.sender as any)?.avatar ?? "";
@@ -242,6 +255,9 @@ export const initializeSocket = (httpServer: HttpServer) => {
           for (const participantId of chat.participants) {
             const pidStr = participantId.toString();
             if (pidStr === userId) continue;
+
+            // Skip push if user is online (socket handles real-time delivery)
+            if (onlineUsers.has(pidStr)) continue;
 
             const recipient = await User.findById(pidStr).select("expoPushToken");
             if (!recipient?.expoPushToken) continue;

@@ -15,9 +15,22 @@ const app = express();
 
 app.use(express.json()); // parses incoming JSON request bodies and makes them available as req.body in your route handlers
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+].filter(Boolean) as string[];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "https://chat-app-psi-wheat-58.vercel.app/", // We will put your Vercel URL in your Render environment variables
-  credentials: true 
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.some(o => origin.startsWith(o.replace(/\/$/, "")))) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
 }));
 
 
