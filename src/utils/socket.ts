@@ -261,7 +261,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
             if (pidStr === userId) continue;
 
             // Skip push if user is online (socket handles real-time delivery)
-            if (onlineUsers.has(pidStr)) continue;
+            // if (onlineUsers.has(pidStr)) continue;
 
             const recipient = await User.findById(pidStr).select("expoPushToken");
             if (!recipient?.expoPushToken) continue;
