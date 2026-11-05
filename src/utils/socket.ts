@@ -26,7 +26,7 @@ interface ExpoPushMessage {
   ttl?: number;
 }
 
-async function sendExpoPushNotification(
+export async function sendExpoPushNotification(
   message: ExpoPushMessage,
 ): Promise<void> {
   if (
@@ -62,6 +62,9 @@ import jwt from "jsonwebtoken";
 // Socket initialization
 // ─────────────────────────────────────────────
 
+export let io: SocketServer | null = null;
+export const getIO = () => io;
+
 export const initializeSocket = (httpServer: HttpServer) => {
   const allowedOrigins = [
     "http://localhost:8081",
@@ -69,7 +72,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
     process.env.FRONTEND_URL,
   ].filter(Boolean) as string[];
 
-  const io = new SocketServer(httpServer, {
+  io = new SocketServer(httpServer, {
     cors: {
       // Allow mobile (no origin) + allowed web origins
       origin: (origin, callback) => {
