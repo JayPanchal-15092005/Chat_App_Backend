@@ -236,51 +236,99 @@ export const initializeSocket = (httpServer: HttpServer) => {
             // on the `never` type that Mongoose infers when overloads can't be resolved.
           })) as any;
 
-          chat.lastMessage = message._id;
-          chat.lastMessageAt = new Date();
-          await chat.save();
+          // Parallelize populate and chat update for minimum DB latency
+          const populatePromise = replyToId
+            ? message.populate([
+                { path: "sender", select: "name avatar" },
+                { path: "replyTo", select: "text sender" },
+              ])
+            : message.populate("sender", "name avatar");
 
-          await message.populate("sender", "name avatar");
-          if (replyToId) {
-            await message.populate("replyTo", "text sender");
-          }
+          const updateChatPromise = Chat.findByIdAndUpdate(chatId, {
+            lastMessage: message._id,
+            lastMessageAt: new Date(),
+          });
 
+          await Promise.all([populatePromise, updateChatPromise]);
+
+          // Immediately broadcast message to chat room and participant rooms
           io.to(`chat:${chatId}`).emit("new-message", message);
 
           for (const participantId of chat.participants) {
-            io.to(`user:${participantId}`).emit("new-message", message);
+            io.to(`user:${participantId.toString()}`).emit("new-message", message);
           }
 
-          // Push notifications — only for users NOT connected to socket
-          const senderUser = await User.findById(userId).select("name");
-          const senderName = senderUser?.name ?? "Someone";
-          const senderAvatar = (message.sender as any)?.avatar ?? "";
+          // Asynchronously dispatch push notifications without blocking the socket event loop
+          (async () => {
+            try {
+              const otherParticipantIds = chat.participants
+                .map((p: any) => p.toString())
+                .filter((pId: string) => pId !== userId);
 
-          for (const participantId of chat.participants) {
-            const pidStr = participantId.toString();
-            if (pidStr === userId) continue;
+              if (otherParticipantIds.length === 0) return;
 
-            // Skip push if user is online (socket handles real-time delivery)
-            if (onlineUsers.has(pidStr)) continue;
+              // Query all recipient push tokens in ONE query instead of sequential loop
+              const recipients = await User.find({
+                _id: { $in: otherParticipantIds },
+                expoPushToken: { $exists: true, $ne: null },
+              }).select("expoPushToken");
 
-            const recipient = await User.findById(pidStr).select("expoPushToken");
-            if (!recipient?.expoPushToken) continue;
+              if (!recipients || recipients.length === 0) return;
 
-            await sendExpoPushNotification({
-              to: recipient.expoPushToken,
-              title: senderName,
-              body: text.length > 100 ? `${text.slice(0, 100)}…` : text,
-              sound: "default",
-              priority: "high",
-              channelId: "messages",
-              data: {
-                chatId,
-                participantId: userId,
-                name: senderName,
-                avatar: senderAvatar,
-              },
-            });
-          }
+              const senderUser = await User.findById(userId).select("name");
+              const senderName = senderUser?.name ?? "Someone";
+              const senderAvatar = (message.sender as any)?.avatar ?? "";
+
+              const isGroupChat = (chat as any).isGroup ?? false;
+              const pushTitle = isGroupChat ? ((chat as any).groupName || "Group") : senderName;
+              const pushBody = isGroupChat
+                ? `${senderName}: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`
+                : (text.length > 100 ? `${text.slice(0, 100)}…` : text);
+
+              // Check which sockets are actively inside this specific chat room
+              const activeChatSockets = io.sockets.adapter.rooms.get(`chat:${chatId}`);
+
+              const pushPromises = recipients.map(async (recipient) => {
+                const rIdStr = recipient._id.toString();
+
+                // If user has a socket actively in this specific chat room right now, skip push
+                const userSocketSet = onlineUsers.get(rIdStr);
+                let isActivelyViewingChat = false;
+                if (userSocketSet && activeChatSockets) {
+                  for (const sId of userSocketSet) {
+                    if (activeChatSockets.has(sId)) {
+                      isActivelyViewingChat = true;
+                      break;
+                    }
+                  }
+                }
+
+                if (isActivelyViewingChat) return;
+
+                if (recipient.expoPushToken) {
+                  await sendExpoPushNotification({
+                    to: recipient.expoPushToken,
+                    title: pushTitle,
+                    body: pushBody,
+                    sound: "default",
+                    priority: "high",
+                    channelId: "messages",
+                    data: {
+                      chatId,
+                      participantId: userId,
+                      name: pushTitle,
+                      isGroup: isGroupChat,
+                      avatar: senderAvatar,
+                    },
+                  });
+                }
+              });
+
+              await Promise.allSettled(pushPromises);
+            } catch (pushErr) {
+              console.error("[Socket] Push notification dispatch error:", pushErr);
+            }
+          })();
         } catch (error) {
           console.error("[Socket] send-message error:", error);
           socket.emit("socket-error", { message: "Failed to send message" });
