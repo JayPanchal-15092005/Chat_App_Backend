@@ -69,6 +69,8 @@ export const initializeSocket = (httpServer: HttpServer) => {
   const allowedOrigins = [
     "http://localhost:8081",
     "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:3000",
     process.env.FRONTEND_URL,
   ].filter(Boolean) as string[];
 
@@ -77,7 +79,10 @@ export const initializeSocket = (httpServer: HttpServer) => {
       // Allow mobile (no origin) + allowed web origins
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        if (allowedOrigins.some(o => origin.startsWith(o.replace(/\/$/, "")))) {
+        if (
+          allowedOrigins.some(o => origin.startsWith(o.replace(/\/$/, ""))) ||
+          origin.endsWith(".vercel.app")
+        ) {
           return callback(null, true);
         }
         return callback(new Error(`Socket CORS: origin ${origin} not allowed`));
