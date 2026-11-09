@@ -66,27 +66,11 @@ export let io: SocketServer | null = null;
 export const getIO = () => io;
 
 export const initializeSocket = (httpServer: HttpServer) => {
-  const allowedOrigins = [
-    "http://localhost:8081",
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:3000",
-    process.env.FRONTEND_URL,
-  ].filter(Boolean) as string[];
-
   io = new SocketServer(httpServer, {
     cors: {
-      // Allow mobile (no origin) + allowed web origins
-      origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        if (
-          allowedOrigins.some(o => origin.startsWith(o.replace(/\/$/, ""))) ||
-          origin.endsWith(".vercel.app")
-        ) {
-          return callback(null, true);
-        }
-        return callback(new Error(`Socket CORS: origin ${origin} not allowed`));
-      },
+      // Allow all origins (mobile Metro LAN IPs, localhost, Vercel preview, etc.)
+      // Authentication and security are strictly enforced by the JWT auth middleware below.
+      origin: (origin, callback) => callback(null, true),
       credentials: true,
     },
   });

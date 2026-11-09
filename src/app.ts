@@ -15,26 +15,8 @@ const app = express();
 
 app.use(express.json()); // parses incoming JSON request bodies and makes them available as req.body in your route handlers
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:3000",
-  "http://localhost:8081",
-  process.env.FRONTEND_URL,
-].filter(Boolean) as string[];
-
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin) return callback(null, true);
-    if (
-      allowedOrigins.some(o => origin.startsWith(o.replace(/\/$/, ""))) ||
-      origin.endsWith(".vercel.app")
-    ) {
-      return callback(null, true);
-    }
-    return callback(new Error(`CORS: origin ${origin} not allowed`));
-  },
+  origin: (origin, callback) => callback(null, true),
   credentials: true,
 }));
 
