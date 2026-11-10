@@ -455,20 +455,21 @@ export const initializeSocket = (httpServer: HttpServer) => {
         isTyping: data.isTyping,
       };
 
+      // Broadcast to everyone in the chat room (covers users actively in the chat screen)
       socket.to(`chat:${data.chatId}`).emit("typing", typingPayload);
 
       try {
         const chat = await Chat.findById(data.chatId);
         if (chat) {
-          // FIX 3: Use optional chaining on `chat.participants` because TypeScript
-          // considers it possibly undefined even inside the `if (chat)` block,
-          // depending on how the Chat model schema is typed.
-          const otherParticipantId = chat.participants?.find(
+          // Also send via user personal rooms for all OTHER participants
+          // (covers users NOT currently in the chat room, e.g. on chat list screen)
+          // This correctly handles both DMs and group chats.
+          const otherParticipantIds = chat.participants?.filter(
             (p: any) => p.toString() !== userId,
-          );
-          if (otherParticipantId) {
+          ) ?? [];
+          for (const participantId of otherParticipantIds) {
             socket
-              .to(`user:${otherParticipantId}`)
+              .to(`user:${participantId.toString()}`)
               .emit("typing", typingPayload);
           }
         }
